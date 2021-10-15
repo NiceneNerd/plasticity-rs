@@ -1,0 +1,12 @@
+[package]
+name = "plasticity"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.44"
+eframe = "0.14.0"
+rfd = "0.5.1"
+roead = { git = "https://github.com/NiceneNerd/roead", rev = "5defd192d1069439038fb3442b33fe4faf3e2630" }
