@@ -7,6 +7,10 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.44"
+crc = "1.8.1"
+cached = "0.25.1"
 eframe = "0.14.0"
+lazy_static = "1.4.0"
 rfd = "0.5.1"
 roead = { git = "https://github.com/NiceneNerd/roead", rev = "5defd192d1069439038fb3442b33fe4faf3e2630" }
+serde_json = "1.0.68"
