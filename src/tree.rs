@@ -1,4 +1,4 @@
-use eframe::egui::{self, CollapsingHeader, Ui};
+use eframe::egui::{CollapsingHeader, Ui};
 
 #[derive(Debug, Default, Clone)]
 pub struct Tree(pub(crate) String, pub(crate) usize, pub(crate) Vec<Tree>);

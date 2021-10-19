@@ -1,8 +1,8 @@
-use crate::{app::Message, tree::Tree, util::*};
-use anyhow::{Context, Error, Result};
+use crate::{tree::Tree, util::*};
+use anyhow::{Context, Result};
 use roead::{
     self,
-    aamp::{ParamList, Parameter, ParameterIO, ParameterList},
+    aamp::{hash_name, ParamList, Parameter, ParameterIO, ParameterList},
 };
 use std::{collections::HashMap, fs, path::Path};
 
@@ -20,10 +20,15 @@ struct References {
 impl AIProgram {
     pub fn new<P: AsRef<Path>>(file: P) -> Result<Self> {
         let pio = ParameterIO::from_binary(fs::read(file.as_ref())?)?;
-        if ["AI", "Action", "Behavior", "Query"]
-            .into_iter()
-            .any(|k| pio.list(k).is_none())
-            || pio.object("DemoAIActionIdx").is_none()
+        if [
+            hash_name("AI"),
+            hash_name("Action"),
+            hash_name("Behavior"),
+            hash_name("Query"),
+        ]
+        .into_iter()
+        .any(|k| pio.lists().get(k).is_none())
+            || pio.objects().get(hash_name("DemoAIActionIdx")).is_none()
         {
             Err(anyhow::anyhow!("Invalid AI program."))
         } else {
@@ -31,9 +36,10 @@ impl AIProgram {
         }
     }
 
-    fn ais(&self) -> Vec<&ParameterList> {
+    pub fn ais(&self) -> Vec<&ParameterList> {
         self.0
-            .list("AI")
+            .lists()
+            .get(hash_name("AI"))
             .unwrap()
             .lists()
             .iter()
@@ -41,9 +47,10 @@ impl AIProgram {
             .collect()
     }
 
-    fn actions(&self) -> Vec<&ParameterList> {
+    pub fn actions(&self) -> Vec<&ParameterList> {
         self.0
-            .list("Action")
+            .lists()
+            .get(hash_name("Action"))
             .unwrap()
             .lists()
             .iter()
@@ -51,9 +58,10 @@ impl AIProgram {
             .collect()
     }
 
-    fn behaviors(&self) -> Vec<&ParameterList> {
+    pub fn behaviors(&self) -> Vec<&ParameterList> {
         self.0
-            .list("Behavior")
+            .lists()
+            .get(hash_name("Behavior"))
             .unwrap()
             .lists()
             .iter()
@@ -61,9 +69,10 @@ impl AIProgram {
             .collect()
     }
 
-    fn queries(&self) -> Vec<&ParameterList> {
+    pub fn queries(&self) -> Vec<&ParameterList> {
         self.0
-            .list("Query")
+            .lists()
+            .get(hash_name("Query"))
             .unwrap()
             .lists()
             .iter()
@@ -71,17 +80,151 @@ impl AIProgram {
             .collect()
     }
 
-    fn items(&self) -> Vec<&ParameterList> {
+    pub fn items(&self) -> Vec<&ParameterList> {
         self.0
-            .list("AI")
+            .lists()
+            .get(hash_name("AI"))
             .unwrap()
             .lists()
             .iter()
-            .chain(self.0.list("Action").unwrap().lists().iter())
-            .chain(self.0.list("Behavior").unwrap().lists().iter())
-            .chain(self.0.list("Query").unwrap().lists().iter())
+            .chain(
+                self.0
+                    .lists()
+                    .get(hash_name("Action"))
+                    .unwrap()
+                    .lists()
+                    .iter(),
+            )
+            .chain(
+                self.0
+                    .lists()
+                    .get(hash_name("Behavior"))
+                    .unwrap()
+                    .lists()
+                    .iter(),
+            )
+            .chain(
+                self.0
+                    .lists()
+                    .get(hash_name("Query"))
+                    .unwrap()
+                    .lists()
+                    .iter(),
+            )
             .map(|(_, v)| v)
             .collect()
+    }
+
+    pub fn actions_offset(&self) -> usize {
+        self.0.lists().get(hash_name("AI")).unwrap().lists().len()
+    }
+
+    pub fn behaviors_offset(&self) -> usize {
+        self.0.lists().get(hash_name("AI")).unwrap().lists().len()
+            + self
+                .0
+                .lists()
+                .get(hash_name("Action"))
+                .unwrap()
+                .lists()
+                .len()
+    }
+
+    pub fn queries_offset(&self) -> usize {
+        self.0.lists().get(hash_name("AI")).unwrap().lists().len()
+            + self
+                .0
+                .lists()
+                .get(hash_name("Action"))
+                .unwrap()
+                .lists()
+                .len()
+            + self
+                .0
+                .lists()
+                .get(hash_name("Behavior"))
+                .unwrap()
+                .lists()
+                .len()
+    }
+
+    pub fn item_mut_at_index(&mut self, idx: usize) -> &mut ParameterList {
+        let actions_offset = self.actions_offset();
+        let behaviors_offset = self.behaviors_offset();
+        let queries_offset = self.queries_offset();
+        if idx < actions_offset {
+            self.0
+                .lists_mut()
+                .get_mut(hash_name("AI"))
+                .unwrap()
+                .lists_mut()
+                .inner_mut()
+                .get_index_mut(idx)
+        } else if idx < behaviors_offset {
+            self.0
+                .lists_mut()
+                .get_mut(hash_name("Action"))
+                .unwrap()
+                .lists_mut()
+                .inner_mut()
+                .get_index_mut(idx - actions_offset)
+        } else if idx < queries_offset {
+            self.0
+                .lists_mut()
+                .get_mut(hash_name("Behavior"))
+                .unwrap()
+                .lists_mut()
+                .inner_mut()
+                .get_index_mut(idx - behaviors_offset)
+        } else {
+            self.0
+                .lists_mut()
+                .get_mut(hash_name("Query"))
+                .unwrap()
+                .lists_mut()
+                .inner_mut()
+                .get_index_mut(idx - queries_offset)
+        }
+        .map(|(_, v)| v)
+        .unwrap()
+    }
+
+    pub fn item_at_index(&self, idx: usize) -> &ParameterList {
+        if idx < self.actions_offset() {
+            self.0
+                .lists()
+                .get(hash_name("AI"))
+                .unwrap()
+                .lists()
+                .inner()
+                .get_index(idx)
+        } else if idx < self.behaviors_offset() {
+            self.0
+                .lists()
+                .get(hash_name("Action"))
+                .unwrap()
+                .lists()
+                .inner()
+                .get_index(idx - self.actions_offset())
+        } else if idx < self.queries_offset() {
+            self.0
+                .lists()
+                .get(hash_name("Behavior"))
+                .unwrap()
+                .lists()
+                .inner()
+                .get_index(idx - self.behaviors_offset())
+        } else {
+            self.0
+                .lists()
+                .get(hash_name("Query"))
+                .unwrap()
+                .lists()
+                .inner()
+                .get_index(idx - self.queries_offset())
+        }
+        .map(|(_, v)| v)
+        .unwrap()
     }
 
     fn references(&self, idx: usize) -> Result<References> {
@@ -92,24 +235,26 @@ impl AIProgram {
             .map(
                 |(i, ai)| -> Result<(HashMap<usize, u32>, HashMap<usize, u32>)> {
                     let child_refs: HashMap<usize, u32> = ai
-                        .object("ChildIdx")
+                        .objects()
+                        .get(hash_name("ChildIdx"))
                         .context("Invalid AI")?
                         .params()
                         .iter()
                         .filter(|(_, v)| v.as_int().is_ok() && v.as_int().unwrap() as usize == idx)
                         .map(|(k, _)| (i, *k))
                         .collect();
-                    let behaviour_refs: HashMap<usize, u32> = match ai.object("BehaviorIdx") {
-                        Some(obj) => obj
-                            .params()
-                            .iter()
-                            .filter(|(_, v)| {
-                                v.as_int().is_ok() && v.as_int().unwrap() as usize == idx
-                            })
-                            .map(|(k, _)| (i, *k))
-                            .collect(),
-                        None => HashMap::default(),
-                    };
+                    let behaviour_refs: HashMap<usize, u32> =
+                        match ai.objects().get(hash_name("BehaviorIdx")) {
+                            Some(obj) => obj
+                                .params()
+                                .iter()
+                                .filter(|(_, v)| {
+                                    v.as_int().is_ok() && v.as_int().unwrap() as usize == idx
+                                })
+                                .map(|(k, _)| (i, *k))
+                                .collect(),
+                            None => HashMap::default(),
+                        };
                     Ok((child_refs, behaviour_refs))
                 },
             )
@@ -119,7 +264,8 @@ impl AIProgram {
         Ok(References {
             demos: self
                 .0
-                .object("DemoAIActionIdx")
+                .objects()
+                .get(hash_name("DemoAIActionIdx"))
                 .unwrap()
                 .params()
                 .iter()
@@ -133,7 +279,7 @@ impl AIProgram {
                 .into_iter()
                 .enumerate()
                 .filter_map(|(i, action)| {
-                    action.object("BehaviorIdx").map(|obj| {
+                    action.objects().get(hash_name("BehaviorIdx")).map(|obj| {
                         obj.params()
                             .iter()
                             .filter_map(|(key, val)| {
@@ -172,25 +318,39 @@ impl AIProgram {
             .collect::<Result<Vec<usize>>>()
     }
 
+    pub fn entry_name<'a>(ai: &'a ParameterList) -> Result<&'a str> {
+        Ok(ai
+            .objects()
+            .get(hash_name("Def"))
+            .context("AI missing def")?
+            .params()
+            .get(&hash_name("Name"))
+            .map(|p| p.as_str_ref())
+            .or_else(|| {
+                ai.objects()
+                    .get(hash_name("Def"))
+                    .unwrap()
+                    .params()
+                    .get(&hash_name("ClassName"))
+                    .map(|p| p.as_string32())
+            })
+            .context("AI missing name or class name")?
+            .map(|s| JPEN_MAP.get(s).map(|s| *s).unwrap_or(s))?)
+    }
+
+    pub fn entry_name_from_index(&self, idx: usize) -> Result<&str> {
+        Self::entry_name(self.items().get(idx).context("Out of bounds")?)
+    }
+
     fn ai_to_tree(&self, idx: usize) -> Result<Tree> {
         let items = self.items();
         let ai = items[idx];
-        let text = ai
-            .object("Def")
-            .context("AI missing def")?
-            .param("Name")
-            .map(|p| p.as_str_ref())
-            .or_else(|| {
-                ai.object("Def")
-                    .unwrap()
-                    .param("ClassName")
-                    .map(|p| p.as_string32())
-            })
-            .context("AI missing name or class name")??;
+        let text = Self::entry_name(ai)?;
         Ok(Tree(
             JPEN_MAP.get(text).unwrap_or(&text).to_string(),
             idx,
-            ai.object("ChildIdx")
+            ai.objects()
+                .get(hash_name("ChildIdx"))
                 .map(|obj| -> Result<Vec<Tree>> {
                     obj.params()
                         .iter()

@@ -12,5 +12,6 @@ cached = "0.25.1"
 eframe = "0.14.0"
 lazy_static = "1.4.0"
 rfd = "0.5.1"
-roead = { git = "https://github.com/NiceneNerd/roead", rev = "5defd192d1069439038fb3442b33fe4faf3e2630" }
+roead = { git = "https://github.com/NiceneNerd/roead", rev = "ca0f70c2959110db24c68e72d912f5ff19a6d0d3" }
+serde = { version = "1.0.130", features = ["derive"] }
 serde_json = "1.0.68"

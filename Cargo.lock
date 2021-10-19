@@ -398,6 +398,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10c2722795460108a7872e1cd933a85d6ec38abc4baecad51028f702da28889f"
+dependencies = [
+ "crc-catalog",
+]
+
+[[package]]
+name = "crc-catalog"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccaeedb56da03b09f598226e25e80088cb4cd25f316e6e4df7d695f0feeb1403"
+
+[[package]]
 name = "crossbeam"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1547,11 +1562,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cached",
- "crc",
+ "crc 1.8.1",
  "eframe",
  "lazy_static",
  "rfd",
  "roead",
+ "serde",
  "serde_json",
 ]
 
@@ -1658,10 +1674,10 @@ dependencies = [
 [[package]]
 name = "roead"
 version = "0.1.0"
-source = "git+https://github.com/NiceneNerd/roead?rev=5defd192d1069439038fb3442b33fe4faf3e2630#5defd192d1069439038fb3442b33fe4faf3e2630"
+source = "git+https://github.com/NiceneNerd/roead?rev=ca0f70c2959110db24c68e72d912f5ff19a6d0d3#ca0f70c2959110db24c68e72d912f5ff19a6d0d3"
 dependencies = [
  "cached",
- "crc",
+ "crc 2.0.0",
  "cxx",
  "cxx-build",
  "derivative",
@@ -1726,6 +1742,20 @@ name = "serde"
 version = "1.0.130"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f12d06de37cf59146fbdecab66aa99f9fe4f78722e3607577a5375d66bd0c913"
+dependencies = [
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.130"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7bc1a1ab1961464eae040d96713baa5a724a8152c1222492465b54322ec508b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "serde_json"
