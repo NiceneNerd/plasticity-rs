@@ -4,10 +4,11 @@ use eframe::{
     egui::{self, menu, FontDefinitions, Frame, Ui, Vec2},
     epi,
 };
-use roead::aamp::{hash_name, ParamList, Parameter, ParameterList};
+use roead::aamp::{hash_name, ParamList, Parameter};
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap},
+    path::PathBuf,
     sync::mpsc::{channel, Receiver, Sender},
 };
 
@@ -19,6 +20,17 @@ pub enum Category {
     Query,
 }
 
+impl std::fmt::Display for Category {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::AI => f.write_fmt(format_args!("AI")),
+            Self::Action => f.write_fmt(format_args!("Action")),
+            Self::Behaviour => f.write_fmt(format_args!("Behavior")),
+            Self::Query => f.write_fmt(format_args!("Query")),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
     AIProgram(AIProgram),
@@ -27,9 +39,11 @@ pub(crate) enum Message {
 }
 
 pub struct App {
+    file: Option<PathBuf>,
     aiprog: Option<AIProgram>,
+    init_prog: Option<AIProgram>,
     tree: Vec<Tree>,
-    names: Vec<String>,
+    cache: HashMap<&'static str, Vec<String>>,
     selected_ai: usize,
     last_selected: HashMap<Category, usize>,
     tab: Category,
@@ -37,14 +51,17 @@ pub struct App {
     show_error: bool,
     error: Option<String>,
     show_busy: bool,
+    title: String,
 }
 
 impl Default for App {
     fn default() -> Self {
         App {
+            file: None,
             aiprog: None,
+            init_prog: None,
             tree: vec![],
-            names: vec![],
+            cache: HashMap::with_capacity(3),
             selected_ai: 0,
             last_selected: HashMap::with_capacity(4),
             tab: Category::AI,
@@ -52,13 +69,14 @@ impl Default for App {
             show_error: false,
             error: None,
             show_busy: false,
+            title: "Plasticity".into(),
         }
     }
 }
 
 impl epi::App for App {
     fn name(&self) -> &str {
-        "Plasticity"
+        self.title.as_str()
     }
 
     fn setup(
@@ -100,7 +118,7 @@ impl epi::App for App {
                 .family_and_size
                 .iter_mut()
                 .for_each(|(_, (_, size))| {
-                    *size *= 1.25;
+                    *size *= 1.2;
                 });
             font_defs
         })
@@ -127,12 +145,41 @@ impl App {
         });
     }
 
-    #[inline(always)]
-    fn selected_ai(&mut self) -> &ParameterList {
-        self.aiprog
-            .as_ref()
-            .unwrap()
-            .item_at_index(self.selected_ai)
+    fn init_hashes(&mut self) {
+        if let Some(aiprog) = self.aiprog.as_ref() {
+            self.cache.insert(
+                "child_names",
+                (0..aiprog.behaviors_offset())
+                    .into_iter()
+                    .map(|i| aiprog.entry_name_from_index(i).unwrap().to_owned())
+                    .collect(),
+            );
+            self.cache.insert(
+                "behaviour_names",
+                aiprog
+                    .behaviors()
+                    .into_iter()
+                    .map(|ai| AIProgram::entry_name(ai).unwrap().to_owned())
+                    .collect(),
+            );
+            self.cache.insert(
+                "group_names",
+                [String::new()]
+                    .into_iter()
+                    .chain(aiprog.ais().into_iter().map(|ai| {
+                        ai.objects()["Def"]
+                            .params()
+                            .get(&hash_name("Name"))
+                            .unwrap()
+                            .as_string()
+                            .unwrap()
+                            .to_string()
+                    }))
+                    .collect::<BTreeSet<String>>()
+                    .into_iter()
+                    .collect(),
+            );
+        }
     }
 
     fn handle_events(&mut self) {
@@ -141,14 +188,12 @@ impl App {
             match res {
                 Ok(msg) => match msg {
                     Message::AIProgram(aiprog) => {
-                        self.names = (0..aiprog.behaviors_offset())
-                            .into_iter()
-                            .map(|i| aiprog.entry_name_from_index(i).unwrap().to_owned())
-                            .collect();
                         self.selected_ai = 0;
                         self.last_selected = HashMap::with_capacity(4);
+                        self.init_prog = Some(aiprog.clone());
                         self.aiprog = Some(aiprog.clone());
-                        self.start_task(move || aiprog.to_tree().map(|t| Message::Tree(t)));
+                        self.init_hashes();
+                        self.start_task(move || aiprog.to_tree().map(Message::Tree));
                     }
                     Message::Tree(tree) => self.tree = tree,
                     _ => (),
@@ -171,6 +216,9 @@ impl App {
             };
             self.last_selected.insert(self.tab, self.selected_ai);
         }
+        if self.init_prog != self.aiprog && !self.title.starts_with('*') {
+            self.title = format!("*{}", self.title);
+        }
     }
 
     fn render_menu(&mut self, ctx: &egui::CtxRef) {
@@ -182,19 +230,38 @@ impl App {
                             .add_filter("BOTW AI Program", &["baiprog", "yml"])
                             .pick_file()
                         {
-                            self.start_task(move || {
-                                AIProgram::new(&file).map(|a| Message::AIProgram(a))
-                            });
+                            self.title = format!(
+                                "{} - Plasticity",
+                                file.file_name().unwrap().to_string_lossy()
+                            );
+                            self.file = Some(file.clone());
+                            self.start_task(move || AIProgram::new(&file).map(Message::AIProgram));
                         }
                     }
-                    if ui.button("Save").clicked() {
-                        println!("Save");
+                    if ui.button("Save").clicked() && self.aiprog.is_some() && self.file.is_some() {
+                        let file = self.file.clone().unwrap();
+                        let aiprog = self.aiprog.clone().unwrap();
+                        self.start_task(move || {
+                            std::fs::write(&file, &aiprog.save())
+                                .map(|_| Message::Null)
+                                .map_err(|e| e.into())
+                        })
                     }
                     if ui.button("Save As").clicked() {
-                        println!("Save As");
+                        if let Some(file) = rfd::FileDialog::new()
+                            .add_filter("BOTW AI Program", &["baiprog", "yml"])
+                            .save_file()
+                        {
+                            let aiprog = self.aiprog.clone().unwrap();
+                            self.start_task(move || {
+                                std::fs::write(&file, &aiprog.save())
+                                    .map(|_| Message::Null)
+                                    .map_err(|e| e.into())
+                            })
+                        }
                     }
                     if ui.button("Exit").clicked() {
-                        println!("Exit");
+                        std::process::exit(0);
                     }
                 });
             });
@@ -290,28 +357,28 @@ impl App {
     fn render_editor(&mut self, ui: &mut Ui, ctx: &egui::CtxRef) {
         let mut update_tree = false;
         egui::ScrollArea::auto_sized().show(ui, |ui| {
-            if let Some(aiprog) = self.aiprog.as_mut() {
+            if self.aiprog.is_some() {
                 ui.horizontal(|_ui| {
                     egui::CentralPanel::default().show(ctx, |ui| {
                         egui::ScrollArea::auto_sized()
                             .id_source("editor")
                             .show(ui, |ui| {
-                                egui::ComboBox::from_label("Current Entry")
-                                    .width(ui.available_width() - 125.0)
-                                    .selected_text(
-                                        aiprog.entry_name_from_index(self.selected_ai).unwrap(),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        (match self.tab {
-                                            Category::AI => aiprog.ais(),
-                                            Category::Action => aiprog.actions(),
-                                            Category::Behaviour => aiprog.behaviors(),
-                                            Category::Query => aiprog.queries(),
-                                        })
-                                        .into_iter()
-                                        .enumerate()
-                                        .for_each(
-                                            |(i, list)| {
+                                if let Some(aiprog) = self.aiprog.as_mut() {
+                                    egui::ComboBox::from_label("Current Entry")
+                                        .width(ui.available_width() - 125.0)
+                                        .selected_text(
+                                            aiprog.entry_name_from_index(self.selected_ai).unwrap(),
+                                        )
+                                        .show_ui(ui, |ui| {
+                                            (match self.tab {
+                                                Category::AI => aiprog.ais(),
+                                                Category::Action => aiprog.actions(),
+                                                Category::Behaviour => aiprog.behaviors(),
+                                                Category::Query => aiprog.queries(),
+                                            })
+                                            .into_iter()
+                                            .enumerate()
+                                            .for_each(|(i, list)| {
                                                 let idx = i + match self.tab {
                                                     Category::AI => 0,
                                                     Category::Action => aiprog.actions_offset(),
@@ -324,32 +391,19 @@ impl App {
                                                     &mut self.selected_ai,
                                                     idx,
                                                     format!(
-                                                        "{}. {}",
-                                                        i + 1,
+                                                        "{}_{}. {}",
+                                                        self.tab,
+                                                        i,
                                                         AIProgram::entry_name(list).unwrap()
                                                     ),
                                                 );
-                                            },
-                                        );
-                                    });
-                                update_tree = update_tree
-                                    || Self::render_definition(
-                                        aiprog,
-                                        self.selected_ai,
-                                        &self.tab,
-                                        ui,
-                                    );
-                                update_tree = update_tree
-                                    || Self::render_ai_children(
-                                        aiprog,
-                                        self.selected_ai,
-                                        self.names.as_slice(),
-                                        ui,
-                                    );
-                                Self::render_sinst_parameters(
-                                    aiprog.item_mut_at_index(self.selected_ai),
-                                    ui,
-                                );
+                                            });
+                                        });
+                                }
+                                update_tree = update_tree || self.render_definition(ui);
+                                update_tree = update_tree || self.render_ai_children(ui);
+                                self.render_sinst_parameters(ui);
+                                self.render_behaviour_indexes(ui);
                             });
                     });
                 });
@@ -361,172 +415,195 @@ impl App {
         }
     }
 
-    fn render_definition(
-        aiprog: &mut AIProgram,
-        selected: usize,
-        category: &Category,
-        ui: &mut Ui,
-    ) -> bool {
+    fn render_definition(&mut self, ui: &mut Ui) -> bool {
         let mut update_tree = false;
-        let group_names: BTreeSet<String> = [String::new()]
-            .into_iter()
-            .chain(aiprog.ais().into_iter().map(|ai| {
-                ai.objects()["Def"]
-                    .params()
-                    .get(&hash_name("Name"))
-                    .unwrap()
-                    .as_string()
-                    .unwrap()
-                    .to_string()
-            }))
-            .collect();
-        let ai = aiprog.item_mut_at_index(selected);
-        if let Some(defs) = ai.objects_mut().get_mut(hash_name("Def")) {
-            egui::CollapsingHeader::new("Definition")
-                .default_open(true)
-                .show(ui, |ui| {
-                    egui::Grid::new("def").num_columns(2).show(ui, |ui| {
-                        if let Some(name) =
-                            defs.params_mut()
+        if let Some(aiprog) = self.aiprog.as_mut() {
+            let ai = aiprog.item_mut_at_index(self.selected_ai);
+            if let Some(defs) = ai.objects_mut().get_mut(hash_name("Def")) {
+                egui::CollapsingHeader::new("Definition")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        egui::Grid::new("def").num_columns(2).show(ui, |ui| {
+                            if let Some(name) = defs
+                                .params_mut()
                                 .get_mut(&hash_name("Name"))
                                 .and_then(|n| match n {
                                     Parameter::StringRef(s) => Some(s),
                                     _ => None,
                                 })
-                        {
-                            ui.label("Name");
-                            if ui.text_edit_singleline(name).changed() {
-                                update_tree = true;
+                            {
+                                ui.label("Name");
+                                if ui.text_edit_singleline(name).changed() {
+                                    update_tree = true;
+                                };
+                                ui.end_row();
                             };
-                            ui.end_row();
-                        };
-                        if let Some(name) = defs
-                            .params_mut()
-                            .get_mut(&hash_name("ClassName"))
-                            .and_then(|n| match n {
-                                Parameter::String32(s) => Some(s),
-                                _ => None,
-                            })
-                        {
-                            ui.label("ClassName");
-                            // ui.text_edit_singleline(name);
-                            egui::ComboBox::from_id_source("class_name")
-                                .selected_text(name.clone())
-                                .width(ui.spacing().text_edit_width)
-                                .show_ui(ui, |ui| {
-                                    AIDEFS.classes(category).for_each(|class| {
-                                        ui.selectable_value(name, class.to_owned(), class);
+                            if let Some(name) = defs
+                                .params_mut()
+                                .get_mut(&hash_name("ClassName"))
+                                .and_then(|n| match n {
+                                    Parameter::String32(s) => Some(s),
+                                    _ => None,
+                                })
+                            {
+                                ui.label("ClassName");
+                                // ui.text_edit_singleline(name);
+                                egui::ComboBox::from_id_source("class_name")
+                                    .selected_text(name.clone())
+                                    .width(ui.spacing().text_edit_width)
+                                    .show_ui(ui, |ui| {
+                                        AIDEFS.classes(self.tab).for_each(|class| {
+                                            ui.selectable_value(name, class.to_owned(), class);
+                                        });
                                     });
-                                });
-                            ui.end_row();
-                        };
-                        if let Some(name) = defs
-                            .params_mut()
-                            .get_mut(&hash_name("GroupName"))
-                            .and_then(|n| match n {
-                                Parameter::StringRef(s) => Some(s),
-                                _ => None,
-                            })
-                        {
-                            ui.label("GroupName");
-                            // ui.text_edit_singleline(name);
-                            egui::ComboBox::from_id_source("group_name")
-                                .selected_text(name.clone())
-                                .width(ui.spacing().text_edit_width)
-                                .show_ui(ui, |ui| {
-                                    group_names.into_iter().for_each(|ai_name| {
-                                        ui.selectable_value(
-                                            name,
-                                            ai_name.clone(),
-                                            JPEN_MAP
-                                                .get(ai_name.as_str())
-                                                .map(|s| format!("{} ({})", s, &ai_name))
-                                                .unwrap_or(ai_name),
-                                        );
+                                ui.end_row();
+                            };
+                            if let Some(name) = defs
+                                .params_mut()
+                                .get_mut(&hash_name("GroupName"))
+                                .and_then(|n| match n {
+                                    Parameter::StringRef(s) => Some(s),
+                                    _ => None,
+                                })
+                            {
+                                ui.label("GroupName");
+                                // ui.text_edit_singleline(name);
+                                egui::ComboBox::from_id_source("group_name")
+                                    .selected_text(name.clone())
+                                    .width(ui.spacing().text_edit_width)
+                                    .show_ui(ui, |ui| {
+                                        let group_names = &self.cache["group_names"];
+                                        group_names.iter().for_each(|ai_name| {
+                                            ui.selectable_value(
+                                                name,
+                                                ai_name.clone(),
+                                                JPEN_MAP
+                                                    .get(ai_name.as_str())
+                                                    .map(|s| format!("{} ({})", s, &ai_name))
+                                                    .unwrap_or_else(|| ai_name.to_string()),
+                                            );
+                                        });
                                     });
-                                });
-                            ui.end_row();
-                        };
+                                ui.end_row();
+                            };
+                        });
                     });
-                });
+            }
         }
         update_tree
     }
 
-    fn render_ai_children(
-        aiprog: &mut AIProgram,
-        selected: usize,
-        names: &[String],
-        ui: &mut Ui,
-    ) -> bool {
-        let ai_count = aiprog.actions_offset();
+    fn render_ai_children(&mut self, ui: &mut Ui) -> bool {
         let mut update_tree = false;
-        if aiprog
-            .item_at_index(selected)
-            .objects()
-            .get(hash_name("ChildIdx"))
-            .is_some()
-        {
-            egui::CollapsingHeader::new("Children")
-                .default_open(true)
-                .show(ui, |ui| {
-                    egui::Grid::new("child_idx").num_columns(2).show(ui, |ui| {
-                        for (k, v) in aiprog
-                            .item_mut_at_index(selected)
-                            .objects_mut()
-                            .get_mut(hash_name("ChildIdx"))
-                            .unwrap()
-                            .params_mut()
-                            .iter_mut()
-                            .map(|(k, v)| (k, v.as_mut_int().unwrap()))
-                        {
-                            let child_name = try_name(*k);
-                            ui.label(
-                                JPEN_MAP
-                                    .get(&child_name.as_str())
-                                    .unwrap_or(&child_name.as_str())
-                                    .to_owned(),
-                            );
-                            egui::ComboBox::from_id_source(k)
-                                .selected_text(names[(*v as usize)].clone())
-                                .width(ui.spacing().text_edit_width)
-                                .show_ui(ui, |ui| {
-                                    names.iter().enumerate().for_each(|(i, name)| {
-                                        if ui
-                                            .selectable_value(v, i as i32, {
+        if self.aiprog.is_some() {
+            let mut updates: HashMap<usize, String> = HashMap::new();
+            let aiprog = self.aiprog.as_mut().unwrap();
+            let ai_name = aiprog
+                .item_at_index(self.selected_ai)
+                .objects()
+                .get(hash_name("Def"))
+                .unwrap()
+                .params()
+                .get(&hash_name("Name"))
+                .unwrap()
+                .as_string()
+                .unwrap()
+                .to_string();
+            let ai_count = aiprog.actions_offset();
+            if aiprog
+                .item_at_index(self.selected_ai)
+                .objects()
+                .get(hash_name("ChildIdx"))
+                .is_some()
+            {
+                egui::CollapsingHeader::new("Children")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        egui::Grid::new("child_idx").num_columns(2).show(ui, |ui| {
+                            for (k, v) in aiprog
+                                .item_mut_at_index(self.selected_ai)
+                                .objects_mut()
+                                .get_mut(hash_name("ChildIdx"))
+                                .unwrap()
+                                .params_mut()
+                                .iter_mut()
+                                .map(|(k, v)| (k, v.as_mut_int().unwrap()))
+                            {
+                                let child_name = try_name(*k);
+                                ui.label(
+                                    JPEN_MAP
+                                        .get(&child_name.as_str())
+                                        .unwrap_or(&child_name.as_str())
+                                        .to_owned(),
+                                );
+                                let names = &self.cache["child_names"];
+                                egui::ComboBox::from_id_source(k)
+                                    .selected_text(names[(*v as usize)].clone())
+                                    .width(ui.spacing().text_edit_width)
+                                    .show_ui(ui, |ui| {
+                                        names.iter().enumerate().for_each(|(i, name)| {
+                                            let value = ui.selectable_value(v, i as i32, {
                                                 if i < ai_count {
-                                                    format!("AI {}. {}", i + 1, name)
+                                                    format!("AI_{}. {}", i, name)
                                                 } else {
-                                                    format!("Action {}. {}", i - ai_count + 1, name)
+                                                    format!("Action_{}. {}", i - ai_count, name)
                                                 }
-                                            })
-                                            .changed()
-                                        {
-                                            update_tree = true;
-                                        }
+                                            });
+                                            if value.changed() {
+                                                update_tree = true;
+                                                if value.clicked() {
+                                                    updates.insert(i, child_name.clone());
+                                                }
+                                            }
+                                        });
                                     });
-                                });
-                            ui.end_row();
-                        }
+                                ui.end_row();
+                            }
+                        });
                     });
-                });
+            }
+            updates.into_iter().for_each(|(i, s)| {
+                let defs = aiprog
+                    .item_mut_at_index(i)
+                    .objects_mut()
+                    .get_mut(hash_name("Def"))
+                    .unwrap()
+                    .params_mut();
+                defs.insert(hash_name("Name"), Parameter::StringRef(s));
+                defs.insert(
+                    hash_name("GroupName"),
+                    Parameter::StringRef(ai_name.clone()),
+                );
+            });
+            if update_tree {
+                self.cache.insert(
+                    "child_names",
+                    (0..aiprog.behaviors_offset())
+                        .into_iter()
+                        .map(|i| aiprog.entry_name_from_index(i).unwrap().to_owned())
+                        .collect(),
+                );
+            }
         }
         update_tree
     }
 
-    fn render_sinst_parameters(ai: &mut ParameterList, ui: &mut Ui) {
-        if let Some(params) = ai.objects_mut().get_mut(hash_name("SInst")) {
-            egui::CollapsingHeader::new("Static Instance Parameters")
-                .default_open(true)
-                .show(ui, |ui| {
-                    egui::Grid::new("sinst").num_columns(2).show(ui, |ui| {
-                        for (k, v) in params.params_mut().iter_mut() {
-                            ui.label(try_name(*k));
-                            Self::render_parameter(ui, v);
-                            ui.end_row();
-                        }
+    fn render_sinst_parameters(&mut self, ui: &mut Ui) {
+        if let Some(aiprog) = self.aiprog.as_mut() {
+            let ai = aiprog.item_mut_at_index(self.selected_ai);
+            if let Some(params) = ai.objects_mut().get_mut(hash_name("SInst")) {
+                egui::CollapsingHeader::new("Static Instance Parameters")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        egui::Grid::new("sinst").num_columns(2).show(ui, |ui| {
+                            for (k, v) in params.params_mut().iter_mut() {
+                                ui.label(try_name(*k));
+                                Self::render_parameter(ui, v);
+                                ui.end_row();
+                            }
+                        });
                     });
-                });
+            }
         }
     }
 
@@ -592,6 +669,40 @@ impl App {
                 });
             }
             _ => (),
+        }
+    }
+
+    fn render_behaviour_indexes(&mut self, ui: &mut Ui) {
+        if let Some(aiprog) = self.aiprog.as_mut() {
+            let ai = aiprog.item_mut_at_index(self.selected_ai);
+            if let Some(behaviours) = ai.objects_mut().get_mut(hash_name("BehaviorIdx")) {
+                egui::CollapsingHeader::new("Behaviour Indexes")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        egui::Grid::new("behaviour_idxs")
+                            .num_columns(2)
+                            .show(ui, |ui| {
+                                let names = &self.cache["behaviour_names"];
+                                behaviours.params_mut().iter_mut().for_each(|(k, v)| {
+                                    let idx = v.as_mut_int().unwrap();
+                                    ui.label(try_name(*k));
+                                    egui::ComboBox::from_id_source(k)
+                                        .width(ui.spacing().text_edit_width)
+                                        .selected_text(names[(*idx) as usize].clone())
+                                        .show_ui(ui, |ui| {
+                                            names.iter().enumerate().for_each(|(i, name)| {
+                                                ui.selectable_value(
+                                                    idx,
+                                                    i as i32,
+                                                    format!("Behavior_{}. {}", i, name),
+                                                );
+                                            });
+                                        });
+                                    ui.end_row();
+                                });
+                            });
+                    });
+            }
         }
     }
 

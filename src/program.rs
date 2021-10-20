@@ -6,9 +6,10 @@ use roead::{
 };
 use std::{collections::HashMap, fs, path::Path};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AIProgram(ParameterIO);
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct References {
     demos: Vec<u32>,
@@ -34,6 +35,10 @@ impl AIProgram {
         } else {
             Ok(Self(pio))
         }
+    }
+
+    pub fn save(&self) -> Vec<u8> {
+        self.0.to_binary()
     }
 
     pub fn ais(&self) -> Vec<&ParameterList> {
@@ -318,7 +323,7 @@ impl AIProgram {
             .collect::<Result<Vec<usize>>>()
     }
 
-    pub fn entry_name<'a>(ai: &'a ParameterList) -> Result<&'a str> {
+    pub fn entry_name(ai: &'_ ParameterList) -> Result<&'_ str> {
         Ok(ai
             .objects()
             .get(hash_name("Def"))
@@ -335,7 +340,7 @@ impl AIProgram {
                     .map(|p| p.as_string32())
             })
             .context("AI missing name or class name")?
-            .map(|s| JPEN_MAP.get(s).map(|s| *s).unwrap_or(s))?)
+            .map(|s| JPEN_MAP.get(s).copied().unwrap_or(s))?)
     }
 
     pub fn entry_name_from_index(&self, idx: usize) -> Result<&str> {
