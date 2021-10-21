@@ -1,4 +1,4 @@
-use crate::{tree::Tree, util::*};
+use crate::{app::Category, tree::Tree, util::*};
 use anyhow::{Context, Result};
 use roead::{
     self,
@@ -20,7 +20,14 @@ struct References {
 
 impl AIProgram {
     pub fn new<P: AsRef<Path>>(file: P) -> Result<Self> {
-        let pio = ParameterIO::from_binary(fs::read(file.as_ref())?)?;
+        let file = file.as_ref();
+        let pio = match file.extension() {
+            Some(ext) => match ext.to_str().unwrap() {
+                "yml" => ParameterIO::from_text(fs::read_to_string(file)?)?,
+                _ => ParameterIO::from_binary(fs::read(file)?)?,
+            },
+            None => ParameterIO::from_binary(fs::read(file)?)?,
+        };
         if [
             hash_name("AI"),
             hash_name("Action"),
@@ -37,8 +44,15 @@ impl AIProgram {
         }
     }
 
-    pub fn save(&self) -> Vec<u8> {
-        self.0.to_binary()
+    pub fn save(&self, file: &Path) -> Result<()> {
+        match file.extension() {
+            Some(ext) => match ext.to_str().unwrap() {
+                "yml" => fs::write(file, self.0.to_text())?,
+                _ => fs::write(file, self.0.to_binary())?,
+            },
+            None => fs::write(file, self.0.to_binary())?,
+        };
+        Ok(())
     }
 
     pub fn ais(&self) -> Vec<&ParameterList> {
@@ -88,36 +102,29 @@ impl AIProgram {
     pub fn items(&self) -> Vec<&ParameterList> {
         self.0
             .lists()
-            .get(hash_name("AI"))
-            .unwrap()
-            .lists()
-            .iter()
-            .chain(
-                self.0
-                    .lists()
-                    .get(hash_name("Action"))
-                    .unwrap()
-                    .lists()
-                    .iter(),
-            )
-            .chain(
-                self.0
-                    .lists()
-                    .get(hash_name("Behavior"))
-                    .unwrap()
-                    .lists()
-                    .iter(),
-            )
-            .chain(
-                self.0
-                    .lists()
-                    .get(hash_name("Query"))
-                    .unwrap()
-                    .lists()
-                    .iter(),
-            )
-            .map(|(_, v)| v)
+            .inner()
+            .values()
+            .flat_map(|cat| cat.lists().inner().values())
             .collect()
+    }
+
+    #[allow(dead_code)]
+    pub fn items_mut(&mut self) -> Vec<&mut ParameterList> {
+        self.0
+            .lists_mut()
+            .inner_mut()
+            .values_mut()
+            .flat_map(|cat| cat.lists_mut().inner_mut().values_mut())
+            .collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0
+            .lists()
+            .inner()
+            .values()
+            .flat_map(|cat| cat.lists().inner().values())
+            .count()
     }
 
     pub fn actions_offset(&self) -> usize {
@@ -304,6 +311,192 @@ impl AIProgram {
         })
     }
 
+    fn update_indexes(&mut self, old: usize, new: i32) -> Result<()> {
+        let refs = self.references(old)?;
+        refs.demos.iter().for_each(|key| {
+            self.0
+                .objects_mut()
+                .get_mut(hash_name("DemoAIActionIdx"))
+                .unwrap()
+                .params_mut()
+                .insert(*key, Parameter::Int(new));
+        });
+        refs.ai_children.iter().for_each(|(idx, key)| {
+            self.item_mut_at_index(*idx)
+                .objects_mut()
+                .get_mut(hash_name("ChildIdx"))
+                .unwrap()
+                .params_mut()
+                .insert(*key, Parameter::Int(new));
+        });
+        if !refs.ai_behaviours.is_empty() {
+            let behaviour_idx = if new > 0 {
+                new - (self.behaviors_offset() as i32)
+            } else {
+                new
+            };
+            refs.ai_behaviours.iter().for_each(|(idx, key)| {
+                self.item_mut_at_index(*idx)
+                    .objects_mut()
+                    .get_mut(hash_name("BehaviorIdx"))
+                    .unwrap()
+                    .params_mut()
+                    .insert(*key, Parameter::Int(behaviour_idx));
+            });
+        }
+        if !refs.action_behaviours.is_empty() {
+            let behaviour_idx = if new > 0 {
+                new - (self.behaviors_offset() as i32)
+            } else {
+                new
+            };
+            let actions_offset = self.actions_offset();
+            refs.action_behaviours.iter().for_each(|(idx, key)| {
+                self.item_mut_at_index(actions_offset + idx)
+                    .objects_mut()
+                    .get_mut(hash_name("BehaviorIdx"))
+                    .unwrap()
+                    .params_mut()
+                    .insert(*key, Parameter::Int(behaviour_idx));
+            });
+        }
+        Ok(())
+    }
+
+    pub fn add_entry(&mut self, category: Category, class: String) -> Result<usize> {
+        let entry = AIDEFS.blank_ai(category, class);
+        Ok(match category {
+            Category::AI => {
+                (self.actions_offset()..self.len())
+                    .into_iter()
+                    .rev()
+                    .try_for_each(|i| -> Result<()> {
+                        self.update_indexes(i, i as i32 + 1)?;
+                        Ok(())
+                    })?;
+                let new_idx = self.actions_offset();
+                self.0
+                    .lists_mut()
+                    .get_mut(hash_name("AI"))
+                    .unwrap()
+                    .lists_mut()
+                    .inner_mut()
+                    .insert_full(hash_name(&format!("AI_{}", new_idx)), entry)
+                    .0
+            }
+            Category::Action => {
+                (self.behaviors_offset()..self.len())
+                    .into_iter()
+                    .rev()
+                    .try_for_each(|i| -> Result<()> {
+                        self.update_indexes(i, i as i32 + 1)?;
+                        Ok(())
+                    })?;
+                let new_idx = self.behaviors_offset() - self.actions_offset();
+                self.0
+                    .lists_mut()
+                    .get_mut(hash_name("Action"))
+                    .unwrap()
+                    .lists_mut()
+                    .inner_mut()
+                    .insert_full(hash_name(&format!("Action_{}", new_idx)), entry)
+                    .0
+                    + self.actions_offset()
+            }
+            Category::Behaviour => {
+                (self.queries_offset()..self.len())
+                    .into_iter()
+                    .rev()
+                    .try_for_each(|i| -> Result<()> {
+                        self.update_indexes(i, i as i32 + 1)?;
+                        Ok(())
+                    })?;
+                let new_idx = self.queries_offset() - self.behaviors_offset();
+                self.0
+                    .lists_mut()
+                    .get_mut(hash_name("Behavior"))
+                    .unwrap()
+                    .lists_mut()
+                    .inner_mut()
+                    .insert_full(hash_name(&format!("Behavior_{}", new_idx)), entry)
+                    .0
+                    + self.behaviors_offset()
+            }
+            Category::Query => {
+                let new_idx = self.len() - self.queries_offset();
+                self.0
+                    .lists_mut()
+                    .get_mut(hash_name("Query"))
+                    .unwrap()
+                    .lists_mut()
+                    .inner_mut()
+                    .insert_full(hash_name(&format!("Query_{}", new_idx)), entry)
+                    .0
+                    + self.queries_offset()
+            }
+        })
+    }
+
+    pub fn delete_entry(&mut self, idx: usize) -> Result<()> {
+        self.update_indexes(idx, -1)?;
+        let category = if idx < self.actions_offset() {
+            self.0
+                .lists_mut()
+                .get_mut(hash_name("AI"))
+                .unwrap()
+                .lists_mut()
+                .inner_mut()
+                .shift_remove_index(idx);
+            "AI"
+        } else if idx < self.behaviors_offset() {
+            let idx = idx - self.actions_offset();
+            self.0
+                .lists_mut()
+                .get_mut(hash_name("Action"))
+                .unwrap()
+                .lists_mut()
+                .inner_mut()
+                .shift_remove_index(idx);
+            "Action"
+        } else if idx < self.queries_offset() {
+            let idx = idx - self.behaviors_offset();
+            self.0
+                .lists_mut()
+                .get_mut(hash_name("Behavior"))
+                .unwrap()
+                .lists_mut()
+                .inner_mut()
+                .shift_remove_index(idx);
+            "Behavior"
+        } else {
+            let idx = idx - self.queries_offset();
+            self.0
+                .lists_mut()
+                .get_mut(hash_name("Query"))
+                .unwrap()
+                .lists_mut()
+                .inner_mut()
+                .shift_remove_index(idx);
+            "Query"
+        };
+        (idx..self.len())
+            .into_iter()
+            .try_for_each(|i| -> Result<()> {
+                self.update_indexes(i, i as i32 - 1)?;
+                Ok(())
+            })?;
+        let cat = self.0.list_mut(category).unwrap();
+        let clone = cat.lists().inner().clone();
+        cat.lists_mut().inner_mut().clear();
+        cat.lists_mut()
+            .inner_mut()
+            .extend(clone.into_iter().enumerate().map(|(i, (_, v))| {
+                let key = format!("{}_{}", category, i);
+                (hash_name(&key), v)
+            }));
+        Ok(())
+    }
+
     fn roots(&self) -> Result<Vec<usize>> {
         self.ais()
             .into_iter()
@@ -323,7 +516,7 @@ impl AIProgram {
             .collect::<Result<Vec<usize>>>()
     }
 
-    pub fn entry_name(ai: &'_ ParameterList) -> Result<&'_ str> {
+    pub fn entry_name(ai: &ParameterList) -> Result<&str> {
         Ok(ai
             .objects()
             .get(hash_name("Def"))

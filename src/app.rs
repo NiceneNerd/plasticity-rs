@@ -36,6 +36,7 @@ pub(crate) enum Message {
     AIProgram(AIProgram),
     Tree(Vec<Tree>),
     Null,
+    Delete,
 }
 
 pub struct App {
@@ -51,6 +52,11 @@ pub struct App {
     show_error: bool,
     error: Option<String>,
     show_busy: bool,
+    show_add: bool,
+    add_class: String,
+    show_confirm: bool,
+    confirm_text: Option<String>,
+    confirm_msg: Option<Message>,
     title: String,
 }
 
@@ -69,6 +75,11 @@ impl Default for App {
             show_error: false,
             error: None,
             show_busy: false,
+            show_add: false,
+            add_class: String::new(),
+            show_confirm: false,
+            confirm_text: None,
+            confirm_msg: None,
             title: "Plasticity".into(),
         }
     }
@@ -130,6 +141,8 @@ impl epi::App for App {
         self.render_main(ctx);
         self.render_error(ctx);
         self.render_busy(ctx);
+        self.render_add(ctx);
+        self.render_confirm(ctx);
         self.handle_events();
     }
 }
@@ -196,12 +209,22 @@ impl App {
                         self.start_task(move || aiprog.to_tree().map(Message::Tree));
                     }
                     Message::Tree(tree) => self.tree = tree,
+                    Message::Delete => {
+                        if let Err(e) = self.aiprog.as_mut().unwrap().delete_entry(self.selected_ai)
+                        {
+                            self.show_error(e);
+                        } else {
+                            self.selected_ai = std::cmp::max(0, self.selected_ai - 1);
+                            let aiprog = self.aiprog.clone().unwrap();
+                            self.start_task(move || aiprog.to_tree().map(Message::Tree));
+                        }
+                    }
                     _ => (),
                 },
                 Err(e) => self.show_error(e),
             }
         }
-        if *self.last_selected.get(&self.tab).unwrap_or(&0) != self.selected_ai
+        if *self.last_selected.get(&self.tab).unwrap_or(&9999) != self.selected_ai
             && self.aiprog.is_some()
         {
             let aiprog = self.aiprog.as_ref().unwrap();
@@ -227,7 +250,8 @@ impl App {
                 menu::menu(ui, "File", |ui| {
                     if ui.button("Open").clicked() {
                         if let Some(file) = rfd::FileDialog::new()
-                            .add_filter("BOTW AI Program", &["baiprog", "yml"])
+                            .add_filter("BOTW Binary AI Program", &["baiprog"])
+                            .add_filter("BOTW YAML AI Program", &["yml"])
                             .pick_file()
                         {
                             self.title = format!(
@@ -241,23 +265,18 @@ impl App {
                     if ui.button("Save").clicked() && self.aiprog.is_some() && self.file.is_some() {
                         let file = self.file.clone().unwrap();
                         let aiprog = self.aiprog.clone().unwrap();
-                        self.start_task(move || {
-                            std::fs::write(&file, &aiprog.save())
-                                .map(|_| Message::Null)
-                                .map_err(|e| e.into())
-                        })
+                        self.start_task(move || aiprog.save(&file).map(|_| Message::Null));
+                        self.init_prog = self.aiprog.clone();
                     }
                     if ui.button("Save As").clicked() {
                         if let Some(file) = rfd::FileDialog::new()
-                            .add_filter("BOTW AI Program", &["baiprog", "yml"])
+                            .add_filter("BOTW Binary AI Program", &["baiprog"])
+                            .add_filter("BOTW YAML AI Program", &["yml"])
                             .save_file()
                         {
                             let aiprog = self.aiprog.clone().unwrap();
-                            self.start_task(move || {
-                                std::fs::write(&file, &aiprog.save())
-                                    .map(|_| Message::Null)
-                                    .map_err(|e| e.into())
-                            })
+                            self.start_task(move || aiprog.save(&file).map(|_| Message::Null));
+                            self.init_prog = self.aiprog.clone();
                         }
                     }
                     if ui.button("Exit").clicked() {
@@ -363,42 +382,62 @@ impl App {
                         egui::ScrollArea::auto_sized()
                             .id_source("editor")
                             .show(ui, |ui| {
-                                if let Some(aiprog) = self.aiprog.as_mut() {
-                                    egui::ComboBox::from_label("Current Entry")
-                                        .width(ui.available_width() - 125.0)
-                                        .selected_text(
-                                            aiprog.entry_name_from_index(self.selected_ai).unwrap(),
-                                        )
-                                        .show_ui(ui, |ui| {
-                                            (match self.tab {
-                                                Category::AI => aiprog.ais(),
-                                                Category::Action => aiprog.actions(),
-                                                Category::Behaviour => aiprog.behaviors(),
-                                                Category::Query => aiprog.queries(),
-                                            })
-                                            .into_iter()
-                                            .enumerate()
-                                            .for_each(|(i, list)| {
-                                                let idx = i + match self.tab {
-                                                    Category::AI => 0,
-                                                    Category::Action => aiprog.actions_offset(),
-                                                    Category::Behaviour => {
-                                                        aiprog.behaviors_offset()
-                                                    }
-                                                    Category::Query => aiprog.queries_offset(),
-                                                };
-                                                ui.selectable_value(
-                                                    &mut self.selected_ai,
-                                                    idx,
-                                                    format!(
-                                                        "{}_{}. {}",
-                                                        self.tab,
-                                                        i,
-                                                        AIProgram::entry_name(list).unwrap()
-                                                    ),
-                                                );
-                                            });
-                                        });
+                                if self.aiprog.is_some() {
+                                    ui.horizontal(|ui| {
+                                        if let Some(aiprog) = self.aiprog.as_mut() {
+                                            egui::ComboBox::from_label("Current Entry")
+                                                .width(ui.spacing().text_edit_width)
+                                                .selected_text(
+                                                    aiprog
+                                                        .entry_name_from_index(self.selected_ai)
+                                                        .unwrap(),
+                                                )
+                                                .show_ui(ui, |ui| {
+                                                    (match self.tab {
+                                                        Category::AI => aiprog.ais(),
+                                                        Category::Action => aiprog.actions(),
+                                                        Category::Behaviour => aiprog.behaviors(),
+                                                        Category::Query => aiprog.queries(),
+                                                    })
+                                                    .into_iter()
+                                                    .enumerate()
+                                                    .for_each(|(i, list)| {
+                                                        let idx = i + match self.tab {
+                                                            Category::AI => 0,
+                                                            Category::Action => {
+                                                                aiprog.actions_offset()
+                                                            }
+                                                            Category::Behaviour => {
+                                                                aiprog.behaviors_offset()
+                                                            }
+                                                            Category::Query => {
+                                                                aiprog.queries_offset()
+                                                            }
+                                                        };
+                                                        ui.selectable_value(
+                                                            &mut self.selected_ai,
+                                                            idx,
+                                                            format!(
+                                                                "{}_{}. {}",
+                                                                self.tab,
+                                                                i,
+                                                                AIProgram::entry_name(list)
+                                                                    .unwrap()
+                                                            ),
+                                                        );
+                                                    });
+                                                });
+                                        }
+                                        if ui.small_button("Add New").clicked() {
+                                            self.show_add = true;
+                                        };
+                                        if ui.small_button("Delete Selected").clicked() {
+                                            self.show_confirm(
+                                                "Are you sure you want to delete this AI entry?",
+                                                Message::Delete,
+                                            );
+                                        };
+                                    });
                                 }
                                 update_tree = update_tree || self.render_definition(ui);
                                 update_tree = update_tree || self.render_ai_children(ui);
@@ -447,7 +486,6 @@ impl App {
                                 })
                             {
                                 ui.label("ClassName");
-                                // ui.text_edit_singleline(name);
                                 egui::ComboBox::from_id_source("class_name")
                                     .selected_text(name.clone())
                                     .width(ui.spacing().text_edit_width)
@@ -467,7 +505,6 @@ impl App {
                                 })
                             {
                                 ui.label("GroupName");
-                                // ui.text_edit_singleline(name);
                                 egui::ComboBox::from_id_source("group_name")
                                     .selected_text(name.clone())
                                     .width(ui.spacing().text_edit_width)
@@ -498,17 +535,20 @@ impl App {
         if self.aiprog.is_some() {
             let mut updates: HashMap<usize, String> = HashMap::new();
             let aiprog = self.aiprog.as_mut().unwrap();
-            let ai_name = aiprog
+            let ai_name = match aiprog
                 .item_at_index(self.selected_ai)
                 .objects()
                 .get(hash_name("Def"))
                 .unwrap()
                 .params()
                 .get(&hash_name("Name"))
-                .unwrap()
-                .as_string()
-                .unwrap()
-                .to_string();
+            {
+                Some(n) => n,
+                None => return false,
+            }
+            .as_string()
+            .unwrap()
+            .to_string();
             let ai_count = aiprog.actions_offset();
             if aiprog
                 .item_at_index(self.selected_ai)
@@ -538,7 +578,12 @@ impl App {
                                 );
                                 let names = &self.cache["child_names"];
                                 egui::ComboBox::from_id_source(k)
-                                    .selected_text(names[(*v as usize)].clone())
+                                    .selected_text(
+                                        names
+                                            .get(*v as usize)
+                                            .unwrap_or(&String::from("[NOT SET]"))
+                                            .clone(),
+                                    )
                                     .width(ui.spacing().text_edit_width)
                                     .show_ui(ui, |ui| {
                                         names.iter().enumerate().for_each(|(i, name)| {
@@ -735,8 +780,95 @@ impl App {
         }
     }
 
+    fn render_add(&mut self, ctx: &egui::CtxRef) {
+        let mut show = self.show_add;
+        if self.show_add {
+            egui::Window::new("Add New Entry")
+                .open(&mut show)
+                .default_width(250.0)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    ui.label("Select the AI class for the new entry:");
+                    egui::ComboBox::from_label("ClassName")
+                        .selected_text(self.add_class.clone())
+                        .width(ui.spacing().text_edit_width)
+                        .show_ui(ui, |ui| {
+                            AIDEFS.classes(&self.tab).for_each(|class| {
+                                ui.selectable_value(
+                                    &mut self.add_class,
+                                    class.clone(),
+                                    class.clone(),
+                                );
+                            });
+                        });
+                    ui.horizontal(|ui| {
+                        if ui.button("Close").clicked() {
+                            self.show_add = false;
+                        }
+                        if ui
+                            .add(egui::Button::new("OK").enabled(!self.add_class.is_empty()))
+                            .clicked()
+                        {
+                            match self
+                                .aiprog
+                                .as_mut()
+                                .unwrap()
+                                .add_entry(self.tab, self.add_class.clone())
+                            {
+                                Ok(i) => self.selected_ai = i,
+                                Err(e) => self.show_error(e),
+                            };
+                            self.show_add = false;
+                            self.add_class = String::new();
+                        }
+                    });
+                });
+            if !show {
+                self.show_add = false;
+            }
+        }
+    }
+
+    #[allow(unused_must_use)]
+    fn render_confirm(&mut self, ctx: &egui::CtxRef) {
+        let mut show = self.show_confirm;
+        if self.show_confirm {
+            egui::Window::new("Confirm")
+                .open(&mut show)
+                .default_width(200.0)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.label(self.confirm_text.as_ref().unwrap());
+                    ui.horizontal(|ui| {
+                        if ui.button("Close").clicked() {
+                            self.show_confirm = false;
+                        }
+                        if ui.button("OK").clicked() {
+                            self.show_confirm = false;
+                            self.messengers.0.send(Ok(self
+                                .confirm_msg
+                                .as_ref()
+                                .unwrap()
+                                .to_owned()));
+                        }
+                    });
+                });
+            if !show || !self.show_confirm {
+                self.confirm_msg = None;
+                self.confirm_text = None;
+            }
+        }
+    }
+
     fn show_error(&mut self, error: Error) {
         self.show_error = true;
         self.error = Some(error.to_string());
+    }
+
+    fn show_confirm(&mut self, message: &str, action: Message) {
+        self.show_confirm = true;
+        self.confirm_text = Some(message.to_owned());
+        self.confirm_msg = Some(action);
     }
 }

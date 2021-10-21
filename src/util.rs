@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
 
 use lazy_static::lazy_static;
+use roead::{
+    aamp::{hash_name, ParamList, Parameter, ParameterList, ParameterObject},
+    types::Vector3f,
+};
 use serde::Deserialize;
 
 use crate::app::Category;
@@ -23,7 +27,7 @@ pub enum AIDefParamValue {
 #[serde(untagged)]
 pub enum AIDefEntry {
     None(String),
-    AIDef(AIDef),
+    Some(AIDef),
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -62,9 +66,82 @@ impl AIDefs {
         match *category.borrow() {
             Category::AI => self.ais.keys(),
             Category::Action => self.actions.keys(),
-            Category::Behaviour => self.actions.keys(),
+            Category::Behaviour => self.behaviors.keys(),
             Category::Query => self.querys.keys(),
         }
+    }
+
+    fn default_parameter(param_type: &str, value: &Option<AIDefParamValue>) -> Parameter {
+        if let Some(value) = value {
+            match value {
+                AIDefParamValue::Bool(b) => Parameter::Bool(*b),
+                AIDefParamValue::Float(f) => Parameter::F32(*f),
+                AIDefParamValue::Int(i) => Parameter::Int(*i),
+                AIDefParamValue::String(s) => Parameter::String32(s.clone()),
+                AIDefParamValue::Vec3(v) => Parameter::Vec3(Vector3f {
+                    x: v[0],
+                    y: v[1],
+                    z: v[2],
+                }),
+            }
+        } else {
+            match param_type {
+                "Bool" => Parameter::Bool(false),
+                "Float" => Parameter::F32(0.0),
+                "Int" => Parameter::Int(0),
+                "String" => Parameter::String32(String::new()),
+                "Vec3" => Parameter::Vec3(Vector3f::default()),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    pub fn blank_ai(&self, category: Category, class: String) -> ParameterList {
+        let mut ai = ParameterList::new();
+        let mut defs = ParameterObject::new();
+        if matches!(category, Category::AI | Category::Action) {
+            defs.params_mut()
+                .insert(hash_name("Name"), Parameter::StringRef("".into()));
+            defs.params_mut()
+                .insert(hash_name("GroupName"), Parameter::StringRef("".into()));
+        }
+        defs.params_mut()
+            .insert(hash_name("ClassName"), Parameter::String32(class.clone()));
+        ai.objects_mut().inner_mut().insert(hash_name("Def"), defs);
+        if let AIDefEntry::Some(ai_def) = (match category {
+            Category::AI => &self.ais,
+            Category::Action => &self.actions,
+            Category::Behaviour => &self.behaviors,
+            Category::Query => &self.querys,
+        })
+        .get(&class)
+        .unwrap()
+        {
+            if let Some(childs) = &ai_def.childs {
+                let mut children = ParameterObject::new();
+                for child in childs.keys() {
+                    children
+                        .params_mut()
+                        .insert(hash_name(child.as_str()), Parameter::Int(-1));
+                }
+                ai.objects_mut()
+                    .inner_mut()
+                    .insert(hash_name("ChildIdx"), children);
+            }
+            if let Some(params) = &ai_def.static_inst_params {
+                let mut sinst_params = ParameterObject::new();
+                for sinst in params {
+                    sinst_params.params_mut().insert(
+                        hash_name(&sinst.name),
+                        Self::default_parameter(&sinst.param_type, &sinst.value),
+                    );
+                }
+                ai.objects_mut()
+                    .inner_mut()
+                    .insert(hash_name("SInst"), sinst_params);
+            }
+        }
+        ai
     }
 }
 
