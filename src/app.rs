@@ -1,4 +1,4 @@
-use crate::{program::AIProgram, tree::Tree, util::*};
+use crate::{auto::*, program::AIProgram, tree::Tree, util::*};
 use anyhow::{Error, Result};
 use eframe::{
     egui::{self, menu, FontDefinitions, Frame, Ui, Vec2},
@@ -53,6 +53,7 @@ pub struct App {
     error: Option<String>,
     show_busy: bool,
     show_add: bool,
+    add_ac_state: AcState,
     add_class: String,
     show_confirm: bool,
     confirm_text: Option<String>,
@@ -77,6 +78,7 @@ impl Default for App {
             show_busy: false,
             show_add: false,
             add_class: String::new(),
+            add_ac_state: AcState::default(),
             show_confirm: false,
             confirm_text: None,
             confirm_msg: None,
@@ -819,20 +821,34 @@ impl App {
                 .default_width(250.0)
                 .collapsible(false)
                 .show(ctx, |ui| {
-                    ui.spacing_mut().item_spacing.y = 4.0;
+                    ui.spacing_mut().item_spacing.y = 9.0;
                     ui.label("Select the AI class for the new entry:");
-                    egui::ComboBox::from_label("ClassName")
-                        .selected_text(self.add_class.clone())
-                        .width(ui.spacing().text_edit_width)
-                        .show_ui(ui, |ui| {
-                            AIDEFS.classes(&self.tab).for_each(|class| {
-                                ui.selectable_value(
-                                    &mut self.add_class,
-                                    class.clone(),
-                                    class.clone(),
-                                );
-                            });
-                        });
+                    let text_class = egui::TextEdit::singleline(&mut self.add_class)
+                        .lock_focus(true)
+                        .hint_text("AI entry class name");
+                    let res = ui.add(text_class);
+                    let classes = AIDEFS.get_classes(&self.tab);
+                    if !classes.contains(&self.add_class.as_str()) {
+                        autocomplete_popup(
+                            &mut self.add_class,
+                            &mut self.add_ac_state,
+                            classes.as_slice(),
+                            ui,
+                            &res,
+                        );
+                    }
+                    // egui::ComboBox::from_label("ClassName")
+                    //     .selected_text(self.add_class.clone())
+                    //     .width(ui.spacing().text_edit_width)
+                    //     .show_ui(ui, |ui| {
+                    //         AIDEFS.classes(&self.tab).for_each(|class| {
+                    //             ui.selectable_value(
+                    //                 &mut self.add_class,
+                    //                 class.clone(),
+                    //                 class.clone(),
+                    //             );
+                    //         });
+                    //     });
                     ui.horizontal(|ui| {
                         if ui.button("Close").clicked() {
                             self.show_add = false;
@@ -872,9 +888,9 @@ impl App {
         if self.show_confirm {
             egui::Window::new("Confirm")
                 .open(&mut show)
-                .default_width(200.0)
                 .collapsible(false)
                 .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing.y = 9.0;
                     ui.label(self.confirm_text.as_ref().unwrap());
                     ui.horizontal(|ui| {
                         if ui.button("Close").clicked() {

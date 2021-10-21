@@ -3,6 +3,7 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
 mod app;
+mod auto;
 mod program;
 mod tree;
 mod util;

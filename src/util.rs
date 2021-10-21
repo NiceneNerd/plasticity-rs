@@ -80,6 +80,12 @@ impl AIDefs {
         }
     }
 
+    pub fn get_classes<C: std::borrow::Borrow<Category>>(&self, category: C) -> Vec<&str> {
+        self.classes(category.borrow())
+            .map(|s| s.as_str())
+            .collect()
+    }
+
     fn default_parameter(param_type: &str, value: &Option<AIDefParamValue>) -> Parameter {
         if let Some(value) = value {
             match value {
