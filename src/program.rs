@@ -363,6 +363,35 @@ impl AIProgram {
         Ok(())
     }
 
+    pub fn update_names(&mut self, idx: usize, child: String, parent: String) -> Result<()> {
+        let item = self.item_mut_at_index(idx);
+        let defs = item
+            .objects_mut()
+            .get_mut(hash_name("Def"))
+            .unwrap()
+            .params_mut();
+        defs.insert(hash_name("Name"), Parameter::StringRef(child.clone()));
+        defs.insert(hash_name("GroupName"), Parameter::StringRef(parent));
+        let mut child_updates: Vec<(usize, String)> = vec![];
+        if let Some(childs) = item.objects_mut().get_mut(hash_name("ChildIdx")) {
+            childs
+                .params_mut()
+                .iter_mut()
+                .filter(|(_, v)| **v != Parameter::Int(-1))
+                .try_for_each(|(k, v)| -> Result<()> {
+                    child_updates.push((v.as_int()? as usize, try_name(*k)));
+                    Ok(())
+                })?;
+        }
+        child_updates
+            .into_iter()
+            .try_for_each(|(i, s)| -> Result<()> {
+                self.update_names(i, s, child.clone())?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     pub fn add_entry(&mut self, category: Category, class: String) -> Result<usize> {
         let entry = AIDEFS.blank_ai(category, class);
         Ok(match category {

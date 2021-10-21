@@ -25,6 +25,14 @@ pub enum AIDefParamValue {
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(untagged)]
+pub enum ChildEntries {
+    Map(BTreeMap<String, Vec<AIDefParam>>),
+    List(Vec<String>),
+    None(String),
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
 pub enum AIDefEntry {
     None(String),
     Some(AIDef),
@@ -44,7 +52,8 @@ pub struct AIDefParam {
 pub struct AIDef {
     pub map_unit_inst_params: Option<Vec<AIDefParam>>,
     pub static_inst_params: Option<Vec<AIDefParam>>,
-    pub childs: Option<BTreeMap<String, Vec<AIDefParam>>>,
+    #[serde(rename = "childs")]
+    pub childs: Option<ChildEntries>,
     pub calc_timing: Option<String>,
 }
 
@@ -119,10 +128,22 @@ impl AIDefs {
         {
             if let Some(childs) = &ai_def.childs {
                 let mut children = ParameterObject::new();
-                for child in childs.keys() {
-                    children
-                        .params_mut()
-                        .insert(hash_name(child.as_str()), Parameter::Int(-1));
+                match childs {
+                    ChildEntries::List(v) => {
+                        v.iter().for_each(|child| {
+                            children
+                                .params_mut()
+                                .insert(hash_name(child.as_str()), Parameter::Int(-1));
+                        });
+                    }
+                    ChildEntries::Map(m) => {
+                        m.keys().for_each(|child| {
+                            children
+                                .params_mut()
+                                .insert(hash_name(child.as_str()), Parameter::Int(-1));
+                        });
+                    }
+                    ChildEntries::None(_) => (),
                 }
                 ai.objects_mut()
                     .inner_mut()
@@ -173,7 +194,7 @@ fn try_numbered_name(key: u32) -> String {
     for i in (0..=1000).into_iter().map(|i| i.to_string()) {
         for prefix in &["AI_", "Action_", "Behavior_", "Query_"] {
             let test: String = [*prefix, i.as_str()].join("");
-            if crc::crc32::checksum_ieee(test.as_bytes()) == key {
+            if hash_name(&test) == key {
                 return test;
             }
         }

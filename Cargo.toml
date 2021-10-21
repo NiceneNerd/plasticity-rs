@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.44"
-crc = "1.8.1"
 cached = "0.25.1"
 eframe = "0.14.0"
 lazy_static = "1.4.0"

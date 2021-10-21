@@ -533,7 +533,7 @@ impl App {
     fn render_ai_children(&mut self, ui: &mut Ui) -> bool {
         let mut update_tree = false;
         if self.aiprog.is_some() {
-            let mut updates: HashMap<usize, String> = HashMap::new();
+            let mut update: Option<(usize, String)> = None;
             let aiprog = self.aiprog.as_mut().unwrap();
             let ai_name = match aiprog
                 .item_at_index(self.selected_ai)
@@ -597,7 +597,7 @@ impl App {
                                             if value.changed() {
                                                 update_tree = true;
                                                 if value.clicked() {
-                                                    updates.insert(i, child_name.clone());
+                                                    update = Some((i, child_name.clone()));
                                                 }
                                             }
                                         });
@@ -607,19 +607,15 @@ impl App {
                         });
                     });
             }
-            updates.into_iter().for_each(|(i, s)| {
-                let defs = aiprog
-                    .item_mut_at_index(i)
-                    .objects_mut()
-                    .get_mut(hash_name("Def"))
-                    .unwrap()
-                    .params_mut();
-                defs.insert(hash_name("Name"), Parameter::StringRef(s));
-                defs.insert(
-                    hash_name("GroupName"),
-                    Parameter::StringRef(ai_name.clone()),
-                );
-            });
+            if let Some((i, s)) = update {
+                match aiprog.update_names(i, s, ai_name) {
+                    Ok(_) => (),
+                    Err(e) => {
+                        self.error = Some(e.to_string());
+                        self.show_error = true;
+                    }
+                };
+            };
             if update_tree {
                 self.cache.insert(
                     "child_names",
@@ -816,7 +812,12 @@ impl App {
                                 .unwrap()
                                 .add_entry(self.tab, self.add_class.clone())
                             {
-                                Ok(i) => self.selected_ai = i,
+                                Ok(i) => {
+                                    self.init_hashes();
+                                    self.selected_ai = i;
+                                    let aiprog = self.aiprog.clone().unwrap();
+                                    self.start_task(move || aiprog.to_tree().map(Message::Tree));
+                                }
                                 Err(e) => self.show_error(e),
                             };
                             self.show_add = false;
