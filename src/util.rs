@@ -5,7 +5,7 @@ use roead::{
     aamp::{hash_name, ParamList, Parameter, ParameterList, ParameterObject},
     types::Vector3f,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::app::Category;
 
@@ -13,7 +13,7 @@ static JAP_ENG_MAP_JSON: &str = include_str!("../data/jpen.json");
 static AI_DEF_JSON: &str = include_str!("../data/aidef.json");
 static HASHES_JSON: &str = include_str!("../data/hashes.json");
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum AIDefParamValue {
     Bool(bool),
@@ -23,7 +23,7 @@ pub enum AIDefParamValue {
     Vec3([f32; 3]),
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum ChildEntries {
     Map(BTreeMap<String, Vec<AIDefParam>>),
@@ -31,14 +31,14 @@ pub enum ChildEntries {
     None(String),
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum AIDefEntry {
     None(String),
     Some(AIDef),
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "PascalCase")]
 pub struct AIDefParam {
     pub name: String,
@@ -47,17 +47,17 @@ pub struct AIDefParam {
     pub value: Option<AIDefParamValue>,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "PascalCase")]
 pub struct AIDef {
     pub map_unit_inst_params: Option<Vec<AIDefParam>>,
     pub static_inst_params: Option<Vec<AIDefParam>>,
-    #[serde(rename = "childs")]
+    #[serde(rename(deserialize = "childs", serialize = "Children"))]
     pub childs: Option<ChildEntries>,
     pub calc_timing: Option<String>,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "PascalCase")]
 pub struct AIDefs {
     #[serde(rename = "AIs")]

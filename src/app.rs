@@ -58,6 +58,7 @@ pub struct App {
     show_confirm: bool,
     confirm_text: Option<String>,
     confirm_msg: Option<Message>,
+    show_def: bool,
     title: String,
 }
 
@@ -82,6 +83,7 @@ impl Default for App {
             show_confirm: false,
             confirm_text: None,
             confirm_msg: None,
+            show_def: false,
             title: "Plasticity".into(),
         }
     }
@@ -109,8 +111,8 @@ impl epi::App for App {
                 Cow::Borrowed(include_bytes!("../data/NotoSansJP.otf")),
             );
             font_defs.font_data.insert(
-                "SourceCodePro".to_owned(),
-                Cow::Borrowed(include_bytes!("../data/SourceCodePro.ttf")),
+                "Ocami".to_owned(),
+                Cow::Borrowed(include_bytes!("../data/Ocami.ttf")),
             );
             font_defs
                 .fonts_for_family
@@ -126,7 +128,7 @@ impl epi::App for App {
                 .fonts_for_family
                 .get_mut(&egui::FontFamily::Monospace)
                 .unwrap()
-                .insert(1, "SourceCodePro".to_owned());
+                .insert(0, "Ocami".to_owned());
             font_defs
                 .family_and_size
                 .iter_mut()
@@ -145,6 +147,7 @@ impl epi::App for App {
         self.render_busy(ctx);
         self.render_add(ctx);
         self.render_confirm(ctx);
+        self.render_def(ctx);
         self.handle_events();
     }
 }
@@ -385,70 +388,65 @@ impl App {
                             .id_source("editor")
                             .show(ui, |ui| {
                                 if self.aiprog.is_some() {
-                                    ui.horizontal(|ui| {
-                                        if let Some(aiprog) = self.aiprog.as_mut() {
-                                            egui::ComboBox::from_label("Current Entry")
-                                                .width(ui.spacing().text_edit_width)
-                                                .selected_text(format!(
-                                                    "{}_{}. {}",
-                                                    self.tab,
-                                                    self.selected_ai
-                                                        - if self.selected_ai
-                                                            < aiprog.actions_offset()
-                                                        {
-                                                            0
-                                                        } else if self.selected_ai
-                                                            < aiprog.behaviors_offset()
-                                                        {
-                                                            aiprog.actions_offset()
-                                                        } else if self.selected_ai
-                                                            < aiprog.queries_offset()
-                                                        {
+                                    if let Some(aiprog) = self.aiprog.as_mut() {
+                                        egui::ComboBox::from_label("Current Entry")
+                                            .width(ui.spacing().text_edit_width)
+                                            .selected_text(format!(
+                                                "{}_{}. {}",
+                                                self.tab,
+                                                self.selected_ai
+                                                    - if self.selected_ai < aiprog.actions_offset()
+                                                    {
+                                                        0
+                                                    } else if self.selected_ai
+                                                        < aiprog.behaviors_offset()
+                                                    {
+                                                        aiprog.actions_offset()
+                                                    } else if self.selected_ai
+                                                        < aiprog.queries_offset()
+                                                    {
+                                                        aiprog.behaviors_offset()
+                                                    } else {
+                                                        aiprog.queries_offset()
+                                                    },
+                                                aiprog
+                                                    .entry_name_from_index(self.selected_ai)
+                                                    .unwrap()
+                                            ))
+                                            .show_ui(ui, |ui| {
+                                                (match self.tab {
+                                                    Category::AI => aiprog.ais(),
+                                                    Category::Action => aiprog.actions(),
+                                                    Category::Behaviour => aiprog.behaviors(),
+                                                    Category::Query => aiprog.queries(),
+                                                })
+                                                .into_iter()
+                                                .enumerate()
+                                                .for_each(|(i, _)| {
+                                                    let idx = i + match self.tab {
+                                                        Category::AI => 0,
+                                                        Category::Action => aiprog.actions_offset(),
+                                                        Category::Behaviour => {
                                                             aiprog.behaviors_offset()
-                                                        } else {
-                                                            aiprog.queries_offset()
-                                                        },
-                                                    aiprog
-                                                        .entry_name_from_index(self.selected_ai)
-                                                        .unwrap()
-                                                ))
-                                                .show_ui(ui, |ui| {
-                                                    (match self.tab {
-                                                        Category::AI => aiprog.ais(),
-                                                        Category::Action => aiprog.actions(),
-                                                        Category::Behaviour => aiprog.behaviors(),
-                                                        Category::Query => aiprog.queries(),
-                                                    })
-                                                    .into_iter()
-                                                    .enumerate()
-                                                    .for_each(|(i, _)| {
-                                                        let idx = i + match self.tab {
-                                                            Category::AI => 0,
-                                                            Category::Action => {
-                                                                aiprog.actions_offset()
-                                                            }
-                                                            Category::Behaviour => {
-                                                                aiprog.behaviors_offset()
-                                                            }
-                                                            Category::Query => {
-                                                                aiprog.queries_offset()
-                                                            }
-                                                        };
-                                                        ui.selectable_value(
-                                                            &mut self.selected_ai,
-                                                            idx,
-                                                            format!(
-                                                                "{}_{}. {}",
-                                                                self.tab,
-                                                                i,
-                                                                aiprog
-                                                                    .entry_name_from_index(i)
-                                                                    .unwrap()
-                                                            ),
-                                                        );
-                                                    });
+                                                        }
+                                                        Category::Query => aiprog.queries_offset(),
+                                                    };
+                                                    ui.selectable_value(
+                                                        &mut self.selected_ai,
+                                                        idx,
+                                                        format!(
+                                                            "{}_{}. {}",
+                                                            self.tab,
+                                                            i,
+                                                            aiprog
+                                                                .entry_name_from_index(i)
+                                                                .unwrap()
+                                                        ),
+                                                    );
                                                 });
-                                        }
+                                            });
+                                    }
+                                    ui.horizontal(|ui| {
                                         if ui.small_button("Add New").clicked() {
                                             self.show_add = true;
                                         };
@@ -458,6 +456,9 @@ impl App {
                                                 Message::Delete,
                                             );
                                         };
+                                        if ui.small_button("View AI Def").clicked() {
+                                            self.show_def = true;
+                                        }
                                     });
                                 }
                                 update_tree = update_tree || self.render_definition(ui);
@@ -909,6 +910,48 @@ impl App {
             if !show || !self.show_confirm {
                 self.confirm_msg = None;
                 self.confirm_text = None;
+            }
+        }
+    }
+
+    fn render_def(&mut self, ctx: &egui::CtxRef) {
+        if self.show_def {
+            let mut show = self.show_def;
+            let aiprog = self.aiprog.as_ref().unwrap();
+            egui::Window::new(&format!(
+                "AI Def: {}",
+                aiprog.entry_name_from_index(self.selected_ai).unwrap()
+            ))
+            .open(&mut show)
+            .fixed_size(egui::vec2(425.0, 400.0))
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing.y = 9.0;
+                if let Some(def) = match self.tab {
+                    Category::AI => &AIDEFS.ais,
+                    Category::Action => &AIDEFS.actions,
+                    Category::Behaviour => &AIDEFS.behaviors,
+                    Category::Query => &AIDEFS.querys,
+                }
+                .get(aiprog.entry_name_from_index(self.selected_ai).unwrap())
+                {
+                    egui::ScrollArea::auto_sized().show(ui, |ui| {
+                        let mut text = serde_json::to_string_pretty(def).unwrap();
+                        ui.add(
+                            egui::TextEdit::multiline(&mut text)
+                                .code_editor()
+                                .desired_rows(20)
+                                .desired_width(ui.available_width())
+                                .enabled(false),
+                        );
+                    });
+                }
+                if ui.button("Close").clicked() {
+                    self.show_def = false;
+                }
+            });
+            if !show {
+                self.show_def = false;
             }
         }
     }
