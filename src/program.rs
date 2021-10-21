@@ -566,7 +566,17 @@ impl AIProgram {
     }
 
     pub fn entry_name_from_index(&self, idx: usize) -> Result<&str> {
-        Self::entry_name(self.items().get(idx).context("Out of bounds")?)
+        self.items()
+            .get(idx)
+            .context("Missing entry index")?
+            .objects()
+            .get(hash_name("Def"))
+            .context("Missing defs")?
+            .params()
+            .get(&hash_name("ClassName"))
+            .context("Missing class name")?
+            .as_string()
+            .map_err(|e| e.into())
     }
 
     fn ai_to_tree(&self, idx: usize) -> Result<Tree> {

@@ -387,11 +387,29 @@ impl App {
                                         if let Some(aiprog) = self.aiprog.as_mut() {
                                             egui::ComboBox::from_label("Current Entry")
                                                 .width(ui.spacing().text_edit_width)
-                                                .selected_text(
+                                                .selected_text(format!(
+                                                    "{}_{}. {}",
+                                                    self.tab,
+                                                    self.selected_ai
+                                                        - if self.selected_ai
+                                                            < aiprog.actions_offset()
+                                                        {
+                                                            0
+                                                        } else if self.selected_ai
+                                                            < aiprog.behaviors_offset()
+                                                        {
+                                                            aiprog.actions_offset()
+                                                        } else if self.selected_ai
+                                                            < aiprog.queries_offset()
+                                                        {
+                                                            aiprog.behaviors_offset()
+                                                        } else {
+                                                            aiprog.queries_offset()
+                                                        },
                                                     aiprog
                                                         .entry_name_from_index(self.selected_ai)
-                                                        .unwrap(),
-                                                )
+                                                        .unwrap()
+                                                ))
                                                 .show_ui(ui, |ui| {
                                                     (match self.tab {
                                                         Category::AI => aiprog.ais(),
@@ -401,7 +419,7 @@ impl App {
                                                     })
                                                     .into_iter()
                                                     .enumerate()
-                                                    .for_each(|(i, list)| {
+                                                    .for_each(|(i, _)| {
                                                         let idx = i + match self.tab {
                                                             Category::AI => 0,
                                                             Category::Action => {
@@ -421,7 +439,8 @@ impl App {
                                                                 "{}_{}. {}",
                                                                 self.tab,
                                                                 i,
-                                                                AIProgram::entry_name(list)
+                                                                aiprog
+                                                                    .entry_name_from_index(i)
                                                                     .unwrap()
                                                             ),
                                                         );
@@ -581,7 +600,19 @@ impl App {
                                     .selected_text(
                                         names
                                             .get(*v as usize)
-                                            .unwrap_or(&String::from("[NOT SET]"))
+                                            .map(|name| {
+                                                format!(
+                                                    "{}_{}. {}",
+                                                    if *v < ai_count as i32 {
+                                                        "AI"
+                                                    } else {
+                                                        "Action"
+                                                    },
+                                                    v,
+                                                    name
+                                                )
+                                            })
+                                            .unwrap_or_else(|| String::from("[NOT SET]"))
                                             .clone(),
                                     )
                                     .width(ui.spacing().text_edit_width)
@@ -729,7 +760,11 @@ impl App {
                                     ui.label(try_name(*k));
                                     egui::ComboBox::from_id_source(k)
                                         .width(ui.spacing().text_edit_width)
-                                        .selected_text(names[(*idx) as usize].clone())
+                                        .selected_text(format!(
+                                            "Behavior_{}. {}",
+                                            idx,
+                                            &names[(*idx) as usize]
+                                        ))
                                         .show_ui(ui, |ui| {
                                             names.iter().enumerate().for_each(|(i, name)| {
                                                 ui.selectable_value(
