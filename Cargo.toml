@@ -1,12 +1,12 @@
 [package]
 name = "plasticity"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 
 [dependencies]
 anyhow = "1.0.44"
 cached = "0.25.1"
-eframe = "0.14.0"
+eframe = { git = "https://github.com/NiceneNerd/egui", rev = "dc9387e53d6b5ef2835911e42d50946cec3ead0b" }
 lazy_static = "1.4.0"
 rfd = "0.5.1"
 roead = { git = "https://github.com/NiceneNerd/roead", rev = "ca0f70c2959110db24c68e72d912f5ff19a6d0d3" }

@@ -91,7 +91,7 @@ impl Default for App {
 
 impl epi::App for App {
     fn name(&self) -> &str {
-        self.title.as_str()
+        "Plasticity"
     }
 
     fn setup(
@@ -139,8 +139,8 @@ impl epi::App for App {
         })
     }
 
-    fn update(&mut self, ctx: &egui::CtxRef, _frame: &mut epi::Frame<'_>) {
-        self.render_menu(ctx);
+    fn update(&mut self, ctx: &egui::CtxRef, frame: &mut epi::Frame<'_>) {
+        self.render_menu(ctx, frame);
         self.render_side_panel(ctx);
         self.render_main(ctx);
         self.render_error(ctx);
@@ -148,7 +148,7 @@ impl epi::App for App {
         self.render_add(ctx);
         self.render_confirm(ctx);
         self.render_def(ctx);
-        self.handle_events();
+        self.handle_events(frame);
     }
 }
 
@@ -161,6 +161,11 @@ impl App {
         std::thread::spawn(move || {
             sender.send(task());
         });
+    }
+
+    fn set_title<S: std::borrow::Borrow<str>>(&mut self, title: S, frame: &mut epi::Frame<'_>) {
+        self.title = title.borrow().to_string();
+        frame.set_window_title(title.borrow());
     }
 
     fn init_hashes(&mut self) {
@@ -200,7 +205,7 @@ impl App {
         }
     }
 
-    fn handle_events(&mut self) {
+    fn handle_events(&mut self, frame: &mut epi::Frame<'_>) {
         if let Ok(res) = self.messengers.1.try_recv() {
             self.show_busy = false;
             match res {
@@ -245,11 +250,11 @@ impl App {
             self.last_selected.insert(self.tab, self.selected_ai);
         }
         if self.init_prog != self.aiprog && !self.title.starts_with('*') {
-            self.title = format!("*{}", self.title);
+            self.set_title(format!("*{}", self.title), frame);
         }
     }
 
-    fn render_menu(&mut self, ctx: &egui::CtxRef) {
+    fn render_menu(&mut self, ctx: &egui::CtxRef, frame: &mut epi::Frame<'_>) {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             menu::bar(ui, |ui| {
                 menu::menu(ui, "File", |ui| {
@@ -259,16 +264,27 @@ impl App {
                             .add_filter("BOTW YAML AI Program", &["yml"])
                             .pick_file()
                         {
-                            self.title = format!(
-                                "{} - Plasticity",
-                                file.file_name().unwrap().to_string_lossy()
+                            self.set_title(
+                                format!(
+                                    "{} - Plasticity",
+                                    file.file_name().unwrap().to_string_lossy()
+                                ),
+                                frame,
                             );
+                            frame.set_window_title(self.title.as_str());
                             self.file = Some(file.clone());
                             self.start_task(move || AIProgram::new(&file).map(Message::AIProgram));
                         }
                     }
                     if ui.button("Save").clicked() && self.aiprog.is_some() && self.file.is_some() {
                         let file = self.file.clone().unwrap();
+                        self.set_title(
+                            format!(
+                                "{} - Plasticity",
+                                file.file_name().unwrap().to_string_lossy()
+                            ),
+                            frame,
+                        );
                         let aiprog = self.aiprog.clone().unwrap();
                         self.start_task(move || aiprog.save(&file).map(|_| Message::Null));
                         self.init_prog = self.aiprog.clone();
@@ -279,6 +295,13 @@ impl App {
                             .add_filter("BOTW YAML AI Program", &["yml"])
                             .save_file()
                         {
+                            self.set_title(
+                                format!(
+                                    "{} - Plasticity",
+                                    file.file_name().unwrap().to_string_lossy()
+                                ),
+                                frame,
+                            );
                             let aiprog = self.aiprog.clone().unwrap();
                             self.start_task(move || aiprog.save(&file).map(|_| Message::Null));
                             self.init_prog = self.aiprog.clone();
@@ -304,7 +327,7 @@ impl App {
                 ..Default::default()
             })
             .show(ctx, |ui| {
-                egui::ScrollArea::auto_sized().show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
                     self.tree
                         .iter_mut()
                         .for_each(|t| t.ui(ui, &mut self.selected_ai));
@@ -380,11 +403,11 @@ impl App {
 
     fn render_editor(&mut self, ui: &mut Ui, ctx: &egui::CtxRef) {
         let mut update_tree = false;
-        egui::ScrollArea::auto_sized().show(ui, |ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| {
             if self.aiprog.is_some() {
                 ui.horizontal(|_ui| {
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        egui::ScrollArea::auto_sized()
+                        egui::ScrollArea::vertical()
                             .id_source("editor")
                             .show(ui, |ui| {
                                 if self.aiprog.is_some() {
@@ -856,7 +879,7 @@ impl App {
                             self.show_add = false;
                         }
                         if ui
-                            .add(egui::Button::new("OK").enabled(!self.add_class.is_empty()))
+                            .add_enabled(!self.add_class.is_empty(), egui::Button::new("OK"))
                             .clicked()
                         {
                             match self
@@ -936,14 +959,14 @@ impl App {
                 }
                 .get(aiprog.entry_name_from_index(self.selected_ai).unwrap())
                 {
-                    egui::ScrollArea::auto_sized().show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
                         let mut text = serde_json::to_string_pretty(def).unwrap();
-                        ui.add(
+                        ui.add_enabled(
+                            false,
                             egui::TextEdit::multiline(&mut text)
                                 .code_editor()
                                 .desired_rows(20)
-                                .desired_width(ui.available_width())
-                                .enabled(false),
+                                .desired_width(ui.available_width()),
                         );
                     });
                 }
