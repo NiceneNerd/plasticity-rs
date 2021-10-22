@@ -1,5 +1,8 @@
 [package]
 name = "plasticity"
+license = "GPL-3.0-or-later"
+author = "Caleb Smith <email@calebdixonsmith.top>"
+readme = "README.md"
 version = "0.2.3"
 edition = "2021"
 
