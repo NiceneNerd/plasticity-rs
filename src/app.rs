@@ -4,6 +4,7 @@ use eframe::{
     egui::{self, menu, FontDefinitions, Frame, Ui, Vec2},
     epi,
 };
+use gmod_lzma::decompress;
 use roead::aamp::{hash_name, ParamList, Parameter};
 use std::{
     borrow::Cow,
@@ -104,15 +105,15 @@ impl epi::App for App {
             let mut font_defs = FontDefinitions::default();
             font_defs.font_data.insert(
                 "Roboto".to_owned(),
-                Cow::Borrowed(include_bytes!("../data/Roboto.ttf")),
+                Cow::Owned(decompress(include_bytes!("../data/Roboto.ttf.lz")).unwrap()),
             );
             font_defs.font_data.insert(
                 "NotoSansJP".to_owned(),
-                Cow::Borrowed(include_bytes!("../data/NotoSansJP.otf")),
+                Cow::Owned(decompress(include_bytes!("../data/NotoSansJP.otf.lz")).unwrap()),
             );
             font_defs.font_data.insert(
                 "Ocami".to_owned(),
-                Cow::Borrowed(include_bytes!("../data/Ocami.ttf")),
+                Cow::Owned(decompress(include_bytes!("../data/Ocami.ttf.lz")).unwrap()),
             );
             font_defs
                 .fonts_for_family
