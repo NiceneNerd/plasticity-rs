@@ -390,7 +390,7 @@ impl App {
                                 if self.aiprog.is_some() {
                                     if let Some(aiprog) = self.aiprog.as_mut() {
                                         egui::ComboBox::from_label("Current Entry")
-                                            .width(ui.spacing().text_edit_width)
+                                            .width(ui.available_width() - 125.0)
                                             .selected_text(format!(
                                                 "{}_{}. {}",
                                                 self.tab,
@@ -446,6 +446,7 @@ impl App {
                                                 });
                                             });
                                     }
+                                    ui.add_space(4.0);
                                     ui.horizontal(|ui| {
                                         if ui.small_button("Add New").clicked() {
                                             self.show_add = true;
