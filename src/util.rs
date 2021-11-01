@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use lazy_static::lazy_static;
 use roead::{
-    aamp::{hash_name, ParamList, Parameter, ParameterList, ParameterObject},
+    aamp::{hash_name, ParamList, Parameter, ParameterIO, ParameterList, ParameterObject},
     types::Vector3f,
 };
 use serde::{Deserialize, Serialize};
@@ -173,23 +173,46 @@ impl AIDefs {
 }
 
 lazy_static! {
-    pub static ref JPEN_MAP: std::collections::HashMap<&'static str, &'static str> =
+    pub static ref JPEN_MAP: std::collections::HashMap<&'static str, String> =
         serde_json::from_str(JAP_ENG_MAP_JSON).unwrap();
     pub static ref AIDEFS: AIDefs = serde_json::from_str(AI_DEF_JSON).unwrap();
-    pub static ref NAME_TABLE: roead::aamp::names::NameTable = {
+    pub static ref NAME_TABLE: std::sync::RwLock<roead::aamp::names::NameTable> = {
         let mut table = roead::aamp::names::NameTable::new(true);
         let hashes: std::collections::HashMap<u32, &str> =
             serde_json::from_str(HASHES_JSON).unwrap();
         hashes.into_iter().for_each(|(_, string)| {
             table.add_name(string);
         });
-        table
+        std::sync::RwLock::new(table)
     };
+}
+
+pub fn update_name_table_from_pio(pio: &ParameterIO) {
+    let mut name_table = NAME_TABLE.write().unwrap();
+    fn add_names_from_list(
+        list: &dyn roead::aamp::ParamList,
+        name_table: &mut std::sync::RwLockWriteGuard<'_, roead::aamp::names::NameTable>,
+    ) {
+        list.objects()
+            .inner()
+            .values()
+            .map(|obj| obj.params().values())
+            .flatten()
+            .filter_map(|p| p.as_string().ok())
+            .for_each(|n| name_table.add_name(n));
+        list.lists()
+            .inner()
+            .values()
+            .for_each(|list| add_names_from_list(list, name_table));
+    }
+    add_names_from_list(pio, &mut name_table);
 }
 
 #[cached::proc_macro::cached]
 pub fn try_name(key: u32) -> String {
     NAME_TABLE
+        .read()
+        .unwrap()
         .get_name(key)
         .map(|n| n.to_owned())
         .unwrap_or_else(|| try_numbered_name(key))

@@ -40,6 +40,7 @@ impl AIProgram {
         {
             Err(anyhow::anyhow!("Invalid AI program."))
         } else {
+            update_name_table_from_pio(&pio);
             Ok(Self(pio))
         }
     }
@@ -545,7 +546,7 @@ impl AIProgram {
             .collect::<Result<Vec<usize>>>()
     }
 
-    pub fn entry_name(ai: &ParameterList) -> Result<&str> {
+    pub fn entry_name(ai: &ParameterList) -> Result<String> {
         Ok(ai
             .objects()
             .get(hash_name("Def"))
@@ -562,7 +563,7 @@ impl AIProgram {
                     .map(|p| p.as_string32())
             })
             .context("AI missing name or class name")?
-            .map(|s| JPEN_MAP.get(s).copied().unwrap_or(s))?)
+            .map(|s| JPEN_MAP.get(s).cloned().unwrap_or_else(|| s.to_string()))?)
     }
 
     pub fn entry_name_from_index(&self, idx: usize) -> Result<&str> {
@@ -584,7 +585,7 @@ impl AIProgram {
         let ai = items[idx];
         let text = Self::entry_name(ai)?;
         Ok(Tree(
-            JPEN_MAP.get(text).unwrap_or(&text).to_string(),
+            JPEN_MAP.get(text.as_str()).unwrap_or(&text).to_string(),
             idx,
             ai.objects()
                 .get(hash_name("ChildIdx"))

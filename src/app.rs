@@ -183,7 +183,7 @@ impl App {
                 aiprog
                     .behaviors()
                     .into_iter()
-                    .map(|ai| AIProgram::entry_name(ai).unwrap().to_owned())
+                    .map(|ai| AIProgram::entry_name(ai).unwrap())
                     .collect(),
             );
             self.cache.insert(
@@ -620,7 +620,7 @@ impl App {
                                 ui.label(
                                     JPEN_MAP
                                         .get(&child_name.as_str())
-                                        .unwrap_or(&child_name.as_str())
+                                        .unwrap_or(&child_name)
                                         .to_owned(),
                                 );
                                 let names = &self.cache["child_names"];
